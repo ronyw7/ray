@@ -20,6 +20,7 @@ from ray.data._internal.util import make_async_gen
 from ray.data.block import Block, BlockMetadata, DataBatch
 from ray.data.context import DataContext
 from ray.types import ObjectRef
+import time
 
 
 def iter_batches(
@@ -124,6 +125,8 @@ def iter_batches(
         block_refs: Iterator[Tuple[ObjectRef[Block], BlockMetadata]],
     ) -> Iterator[DataBatch]:
         # Step 1: Prefetch logical batches locally.
+        # OUTPUT_FILE = 'iter_batches.txt'
+        # start = time.time()
         block_refs = prefetch_batches_locally(
             block_ref_iter=block_refs,
             prefetcher=prefetcher,
@@ -131,11 +134,21 @@ def iter_batches(
             batch_size=batch_size,
             eager_free=eager_free,
         )
+        # end = time.time()
+        # print("prefetch_batches_locally: ", end - start)
+        # with open(OUTPUT_FILE, "a+") as f:
+        #     f.write(f"prefetch_batches_locally: {end - start} \n")
 
         # Step 2: Resolve the blocks.
+        # start = time.time()
         block_iter = resolve_block_refs(block_ref_iter=block_refs, stats=stats)
+        # end = time.time()
+        # print("resolve_block_refs: ", end-start)
+        # with open(OUTPUT_FILE, "a+") as f:
+        #     f.write(f"resolve_block_refs: {end - start} \n")
 
         # Step 3: Batch and shuffle the resolved blocks.
+        # start = time.time()
         batch_iter = blocks_to_batches(
             block_iter=block_iter,
             stats=stats,
@@ -145,24 +158,45 @@ def iter_batches(
             shuffle_seed=shuffle_seed,
             ensure_copy=ensure_copy,
         )
+        # end = time.time()
+        # print("blocks_to_batches: ", end - start)
+        # with open(OUTPUT_FILE, "a+") as f:
+        #     f.write(f"blocks_to_batches: {end - start} \n")
 
         # Step 4: Use a threadpool for formatting and collation.
+        # start = time.time()
+        # print(batch_format)
         batch_iter = _format_in_threadpool(
             batch_iter,
             stats=stats,
             batch_format=batch_format,
             collate_fn=collate_fn,
-            num_threadpool_workers=prefetch_batches,
+            # num_threadpool_workers=prefetch_batches,
+            num_threadpool_workers=0
         )
+        # end = time.time()
+        # print("_format_in_threadpool: ", end - start)
+        # with open(OUTPUT_FILE, "a+") as f:
+        #     f.write(f"_format_in_threadpool: {end - start} \n")
 
         # Step 5: Finalize each batch.
+        # start = time.time()
         if finalize_fn is not None:
             batch_iter = finalize_batches(
                 batch_iter, finalize_fn=finalize_fn, stats=stats
             )
+        # end = time.time()
+        # print("finalize_batches: ", end - start)
+        # with open(OUTPUT_FILE, "a+") as f:
+        #     f.write(f"finalize_batches: {end - start} \n")
 
         # Step 6: Restore original order.
+        # start = time.time()
         batch_iter: Iterator[Batch] = restore_original_order(batch_iter)
+        # end = time.time()
+        # print("restore_original_order: ", end - start)
+        # with open(OUTPUT_FILE, "a+") as f:
+        #     f.write(f"restore_original_order {end - start} \n")
 
         yield from extract_data_from_batch(batch_iter)
 
@@ -173,7 +207,11 @@ def iter_batches(
     while True:
         with stats.iter_total_blocked_s.timer() if stats else nullcontext():
             try:
+                # start = time.time()
                 next_batch = next(async_batch_iter)
+                # end = time.time()
+                # with open('AsyncBatchIterNext.txt', "a+") as f:
+                #     f.write(f"{end - start} \n")
             except StopIteration:
                 break
         with stats.iter_user_s.timer() if stats else nullcontext():
@@ -246,7 +284,6 @@ def prefetch_batches_locally(
         batch_size: User specified batch size, or None to let the system pick.
         eager_free: Whether to eagerly free the object reference from the object store.
     """
-
     sliding_window = collections.deque()
     current_window_size = 0
 
@@ -268,10 +305,18 @@ def prefetch_batches_locally(
         batch_size is None and len(sliding_window) < num_batches_to_prefetch
     ):
         try:
+            # a = time.time()
             next_block_ref_and_metadata = next(block_ref_iter)
+            # b = time.time()
+            # with open('PrefetchBatchesLocally-Next.txt', "a+") as f:
+            #         f.write(f"{b - a} \n")
         except StopIteration:
             break
+        # a = time.time()
         sliding_window.append(next_block_ref_and_metadata)
+        # b = time.time()
+        # with open('PrefetchBatchesLocally.txt', "a+") as f:
+        #         f.write(f"{b - a} \n")
         current_window_size += next_block_ref_and_metadata[1].num_rows
 
     prefetcher.prefetch_blocks([block_ref for block_ref, _ in list(sliding_window)])
@@ -281,7 +326,13 @@ def prefetch_batches_locally(
         current_window_size -= metadata.num_rows
         if batch_size is None or current_window_size < num_rows_to_prefetch:
             try:
+                # a = time.time()
                 sliding_window.append(next(block_ref_iter))
+                # b = time.time()
+                # with open('PrefetchBatchesLocally.txt', "a+") as f:
+                #         f.write(f"{b - a} \n")
+                # with open('PrefetchBatchesLocally-Next.txt', "a+") as f:
+                #     f.write(f"{b - a} \n")
                 prefetcher.prefetch_blocks(
                     [block_ref for block_ref, _ in list(sliding_window)]
                 )
@@ -301,6 +352,7 @@ def restore_original_order(batch_iter: Iterator[Batch]) -> Iterator[Batch]:
     `batch_iter` is expected to not have any missing indexes. All indexes from 0 to len
     (base_iterator) must be present.
     """
+    # a = time.time()
     next_index_required = 0
     buffer: Dict[int, Batch] = {}
     for batch in batch_iter:
@@ -313,3 +365,7 @@ def restore_original_order(batch_iter: Iterator[Batch]) -> Iterator[Batch]:
     while next_index_required in buffer:
         yield buffer.pop(next_index_required)
         next_index_required += 1
+    # b = time.time()
+    # with open('RestoreOriginalOrder', "a+") as f:
+    #     f.write(f"prefetch_batches_locally: {b - a} \n")
+

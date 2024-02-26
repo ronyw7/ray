@@ -83,9 +83,14 @@ class Batcher(BatcherInterface):
         Args:
             block: Block to add to the block buffer.
         """
+        import time
         if BlockAccessor.for_block(block).num_rows() > 0:
+            # start = time.time() # @ronyw
             self._buffer.append(block)
             self._buffer_size += BlockAccessor.for_block(block).num_rows()
+            # end = time.time()
+            # with open('BatcherAdd.txt', "a+") as f:
+            #   f.write(f"{end - start} \n") # 0.0008
 
     def done_adding(self) -> bool:
         """Indicate to the batcher that no more blocks will be added to the batcher."""

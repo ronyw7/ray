@@ -139,8 +139,11 @@ class ArrowBlockBuilder(TableBlockBuilder):
                 next(iter(col), None), np.ndarray
             ):
                 from ray.data.extensions.tensor_extension import ArrowTensorArray
-
+                import time
+                start = time.time()
                 columns[col_name] = ArrowTensorArray.from_numpy(col, col_name)
+                end = time.time()
+
         return pyarrow.Table.from_pydict(columns)
 
     @staticmethod
@@ -169,7 +172,6 @@ class ArrowBlockAccessor(TableBlockAccessor):
 
     def append_column(self, name: str, data: Any) -> Block:
         assert name not in self._table.column_names
-
         if any(isinstance(item, np.ndarray) for item in data):
             raise NotImplementedError(
                 f"`{self.__class__.__name__}.append_column()` doesn't support "
@@ -273,7 +275,7 @@ class ArrowBlockAccessor(TableBlockAccessor):
             _concatenate_extension_column,
             _is_column_extension_type,
         )
-
+       
         if columns is None:
             columns = self._table.column_names
             should_be_single_ndarray = False
@@ -299,7 +301,7 @@ class ArrowBlockAccessor(TableBlockAccessor):
                 array = pyarrow.array([], type=array.type)
             else:
                 array = array.combine_chunks()
-            arrays.append(array.to_numpy(zero_copy_only=False))
+            arrays.append(array.to_numpy(zero_copy_only=False)) # @ronyw: experiment with true
 
         if should_be_single_ndarray:
             assert len(columns) == 1

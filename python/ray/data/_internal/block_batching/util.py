@@ -108,7 +108,7 @@ def blocks_to_batches(
             shuffle_seed=shuffle_seed,
         )
     else:
-        batcher = Batcher(batch_size=batch_size, ensure_copy=ensure_copy)
+        batcher = Batcher(batch_size=batch_size, ensure_copy=False)
 
     def get_iter_next_batch_s_timer():
         return stats.iter_next_batch_s.timer() if stats else nullcontext()
@@ -156,11 +156,15 @@ def format_batches(
     Returns:
         An iterator over batch index and the formatted batch.
     """
+    # import time
     for batch in block_iter:
         with stats.iter_format_batch_s.timer() if stats else nullcontext():
+            # start = time.time()
             formatted_batch = BlockAccessor.for_block(batch.data).to_batch_format(
                 batch_format
             )
+            # end = time.time()
+            # print("Format: ", start-end)
         yield Batch(batch.batch_idx, formatted_batch)
 
 

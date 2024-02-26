@@ -332,7 +332,11 @@ def read_datasource(
     Returns:
         :class:`~ray.data.Dataset` that reads data from the :class:`~ray.data.Datasource`.
     """  # noqa: E501
+    # print("parallelism:", parallelism)
+    # print("override_num_blocks:", override_num_blocks)
+
     parallelism = _get_num_output_blocks(parallelism, override_num_blocks)
+    # print("new_parallelism:", parallelism)
 
     ctx = DataContext.get_current()
 
