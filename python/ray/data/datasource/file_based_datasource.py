@@ -1,6 +1,4 @@
 import io
-import posixpath
-import warnings
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -17,9 +15,7 @@ from typing import (
 import numpy as np
 
 import ray
-from ray._private.utils import _add_creatable_buckets_param_if_s3_uri
 from ray.data._internal.dataset_logger import DatasetLogger
-from ray.data._internal.execution.interfaces import TaskContext
 from ray.data._internal.util import (
     _check_pyarrow_version,
     _is_local_scheme,
@@ -28,15 +24,10 @@ from ray.data._internal.util import (
 )
 from ray.data.block import Block, BlockAccessor
 from ray.data.context import DataContext
-from ray.data.datasource.block_path_provider import BlockWritePathProvider
-from ray.data.datasource.datasource import Datasource, ReadTask, WriteResult
+from ray.data.datasource.datasource import Datasource, ReadTask
 from ray.data.datasource.file_meta_provider import (
     BaseFileMetadataProvider,
     DefaultFileMetadataProvider,
-)
-from ray.data.datasource.filename_provider import (
-    FilenameProvider,
-    _DefaultFilenameProvider,
 )
 from ray.data.datasource.partitioning import (
     Partitioning,
@@ -232,6 +223,8 @@ class FileBasedDatasource(Datasource):
 
             DataContext._set_current(ctx)
             fs = _unwrap_s3_serialization_workaround(filesystem)
+            ret = [] 
+
             for read_path in read_paths:
                 partitions: Dict[str, str] = {}
                 if partitioning is not None:
@@ -250,7 +243,27 @@ class FileBasedDatasource(Datasource):
                             block = block_accessor.append_column(
                                 "path", [read_path] * block_accessor.num_rows()
                             )
-                        yield block
+                        # yield block
+                        ret.append(block) # Instead of yielding one block per image, we collect them into ret.
+
+            import pyarrow as pa
+            from ray.data.extensions.tensor_extension import ArrowTensorArray
+            # For diagnosing ArrowTensorArray perf.
+            # start = time.time()
+            # res = ArrowTensorArray.from_numpy(ret, "image")
+            # end = time.time()
+            # with open('ArrowTensorArrayFromNumpy.txt', "a+") as f:
+            #     f.write(f"{end - start} \n")
+            # block = pa.Table.from_pydict({"image": res})
+
+            block = pa.Table.from_pydict({"image": ArrowTensorArray.from_numpy(ret, "image")})
+
+            # start = time.time()
+            # block = pa.Table.from_pydict({"image": ArrowTensorArray.from_numpy(ret, "image")})
+            # end = time.time()
+            # with open('PATableFromPyDict.txt', "a+") as f:
+            #     f.write(f"{end - start} \n")
+            yield block
 
         def create_read_task_fn(read_paths, num_threads):
             def read_task_fn():
@@ -277,7 +290,8 @@ class FileBasedDatasource(Datasource):
 
         # fix https://github.com/ray-project/ray/issues/24296
         parallelism = min(parallelism, len(paths))
-
+        # import time
+        # a = time.time()
         read_tasks = []
         for read_paths, file_sizes in zip(
             np.array_split(paths, parallelism), np.array_split(file_sizes, parallelism)
@@ -297,6 +311,8 @@ class FileBasedDatasource(Datasource):
             read_task = ReadTask(read_task_fn, meta)
 
             read_tasks.append(read_task)
+        # b = time.time()
+        # print(b - a) # 0.0049
 
         return read_tasks
 
@@ -377,202 +393,6 @@ class FileBasedDatasource(Datasource):
             "Subclasses of FileBasedDatasource must implement _read_stream()."
         )
 
-    def on_write_start(
-        self,
-        path: str,
-        try_create_dir: bool = True,
-        filesystem: Optional["pyarrow.fs.FileSystem"] = None,
-        **write_args,
-    ) -> None:
-        """Create a directory to write files to.
-
-        If ``try_create_dir`` is ``False``, this method is a no-op.
-        """
-        from pyarrow.fs import FileType
-
-        self.has_created_dir = False
-        if try_create_dir:
-            paths, filesystem = _resolve_paths_and_filesystem(path, filesystem)
-            assert len(paths) == 1, len(paths)
-            path = paths[0]
-
-            if filesystem.get_file_info(path).type is FileType.NotFound:
-                # Arrow's S3FileSystem doesn't allow creating buckets by default, so we
-                # add a query arg enabling bucket creation if an S3 URI is provided.
-                tmp = _add_creatable_buckets_param_if_s3_uri(path)
-                filesystem.create_dir(tmp, recursive=True)
-                self.has_created_dir = True
-
-    def write(
-        self,
-        blocks: Iterable[Block],
-        ctx: TaskContext,
-        path: str,
-        dataset_uuid: str,
-        filesystem: Optional["pyarrow.fs.FileSystem"] = None,
-        try_create_dir: bool = True,
-        open_stream_args: Optional[Dict[str, Any]] = None,
-        block_path_provider: Optional[BlockWritePathProvider] = None,  # Deprecated
-        filename_provider: Optional[FilenameProvider] = None,
-        write_args_fn: Callable[[], Dict[str, Any]] = lambda: {},
-        file_format: Optional[str] = None,
-        _block_udf: Optional[Callable[[Block], Block]] = None,
-        **write_args,
-    ) -> WriteResult:
-        """Write blocks for a file-based datasource."""
-        # `FileBasedDatasource` subclasses expose a `_FILE_EXTENSIONS` attribute. It
-        # represents a list of supported file extensions. If the user doesn't specify
-        # a file format, we default to the first extension in the list.
-        if file_format is None:
-            file_format = self._FILE_EXTENSIONS
-            if isinstance(file_format, list):
-                file_format = file_format[0]
-
-        path, filesystem = _resolve_paths_and_filesystem(path, filesystem)
-        path = path[0]
-        _write_block_to_file = self._write_block
-        _write_row_to_file = self._write_row
-
-        if open_stream_args is None:
-            open_stream_args = {}
-
-        if block_path_provider is not None:
-            warnings.warn(
-                "`block_path_provider` has been deprecated in favor of "
-                "`filename_provider`. For more information, see "
-                "https://docs.ray.io/en/master/data/api/doc/ray.data.datasource.FilenameProvider.html",  # noqa: E501
-                DeprecationWarning,
-            )
-
-        if filename_provider is None and block_path_provider is None:
-            filename_provider = _DefaultFilenameProvider(
-                dataset_uuid=dataset_uuid, file_format=file_format
-            )
-
-        num_rows_written = 0
-        block_idx = 0
-        for block in blocks:
-            if _block_udf is not None:
-                block = _block_udf(block)
-
-            block = BlockAccessor.for_block(block)
-            if block.num_rows() == 0:
-                continue
-
-            fs = _unwrap_s3_serialization_workaround(filesystem)
-
-            if self._WRITE_FILE_PER_ROW:
-                for row_idx, row in enumerate(block.iter_rows(public_row_format=False)):
-                    if filename_provider is not None:
-                        filename = filename_provider.get_filename_for_row(
-                            row, ctx.task_idx, block_idx, row_idx
-                        )
-                    else:  # Legacy code path
-                        filename = (
-                            f"{dataset_uuid}_{ctx.task_idx:06}_{block_idx:06}_"
-                            f"{row_idx:06}.{file_format}"
-                        )
-                    write_path = posixpath.join(path, filename)
-
-                    logger.get_logger().debug(f"Writing {write_path} file.")
-                    with _open_file_with_retry(
-                        write_path,
-                        lambda: fs.open_output_stream(write_path, **open_stream_args),
-                    ) as f:
-                        _write_row_to_file(
-                            f,
-                            row,
-                            writer_args_fn=write_args_fn,
-                            file_format=file_format,
-                            **write_args,
-                        )
-            else:
-                if filename_provider is not None:
-                    filename = filename_provider.get_filename_for_block(
-                        block, ctx.task_idx, block_idx
-                    )
-                    write_path = posixpath.join(path, filename)
-                else:  # Legacy code path
-                    write_path = block_path_provider(
-                        path,
-                        filesystem=filesystem,
-                        dataset_uuid=dataset_uuid,
-                        task_index=ctx.task_idx,
-                        block_index=block_idx,
-                        file_format=file_format,
-                    )
-
-                logger.get_logger().debug(f"Writing {write_path} file.")
-                with _open_file_with_retry(
-                    write_path,
-                    lambda: fs.open_output_stream(write_path, **open_stream_args),
-                ) as f:
-                    _write_block_to_file(
-                        f,
-                        block,
-                        writer_args_fn=write_args_fn,
-                        **write_args,
-                    )
-
-            num_rows_written += block.num_rows()
-            block_idx += 1
-
-        if num_rows_written == 0:
-            logger.get_logger().warning(
-                f"Skipping writing empty dataset with UUID {dataset_uuid} at {path}",
-            )
-            return "skip"
-
-        # TODO: decide if we want to return richer object when the task
-        # succeeds.
-        return "ok"
-
-    def on_write_complete(
-        self,
-        write_results: List[WriteResult],
-        path: Optional[str] = None,
-        filesystem: Optional["pyarrow.fs.FileSystem"] = None,
-        **kwargs,
-    ) -> None:
-        if not self.has_created_dir:
-            return
-
-        paths, filesystem = _resolve_paths_and_filesystem(path, filesystem)
-        assert len(paths) == 1, len(paths)
-        path = paths[0]
-
-        if all(write_results == "skip" for write_results in write_results):
-            filesystem.delete_dir(path)
-
-    def _write_block(
-        self,
-        f: "pyarrow.NativeFile",
-        block: BlockAccessor,
-        writer_args_fn: Callable[[], Dict[str, Any]] = lambda: {},
-        **writer_args,
-    ):
-        """Writes a block to a single file, passing all kwargs to the writer.
-
-        This method should be implemented by subclasses.
-        """
-        raise NotImplementedError(
-            "Subclasses of FileBasedDatasource must implement _write_files()."
-        )
-
-    def _write_row(
-        self,
-        f: "pyarrow.NativeFile",
-        row,
-        writer_args_fn: Callable[[], Dict[str, Any]] = lambda: {},
-        **writer_args,
-    ):
-        """Writes a row to a single file, passing all kwargs to the writer.
-
-        If `_WRITE_FILE_PER_ROW` is set to `True`, this method will be called instead
-        of `_write_block()`.
-        """
-        raise NotImplementedError
-
     @property
     def supports_distributed_reads(self) -> bool:
         return self._supports_distributed_reads
@@ -591,9 +411,7 @@ def _add_partitions(
         return _add_partitions_to_dataframe(data, partitions)
 
 
-def _add_partitions_to_table(
-    table: "pyarrow.Table", partitions: Dict[str, Any]
-) -> "pyarrow.Table":
+def _add_partitions_to_table(table: "pyarrow.Table", partitions: Dict[str, Any]) -> "pyarrow.Table":
     import pyarrow as pa
     import pyarrow.compute as pc
 
@@ -623,9 +441,7 @@ def _add_partitions_to_table(
     return table
 
 
-def _add_partitions_to_dataframe(
-    df: "pd.DataFrame", partitions: Dict[str, Any]
-) -> "pd.DataFrame":
+def _add_partitions_to_dataframe(df: "pd.DataFrame", partitions: Dict[str, Any]) -> "pd.DataFrame":
     import pandas as pd
 
     for field, value in partitions.items():
@@ -658,7 +474,7 @@ def _wrap_s3_serialization_workaround(filesystem: "pyarrow.fs.FileSystem"):
 
 
 def _unwrap_s3_serialization_workaround(
-    filesystem: Union["pyarrow.fs.FileSystem", "_S3FileSystemWrapper"]
+    filesystem: Union["pyarrow.fs.FileSystem", "_S3FileSystemWrapper"],
 ):
     if isinstance(filesystem, _S3FileSystemWrapper):
         return filesystem.unwrap()
@@ -698,9 +514,7 @@ def _unwrap_arrow_serialization_workaround(kwargs: dict) -> dict:
     return kwargs
 
 
-def _resolve_kwargs(
-    kwargs_fn: Callable[[], Dict[str, Any]], **kwargs
-) -> Dict[str, Any]:
+def _resolve_kwargs(kwargs_fn: Callable[[], Dict[str, Any]], **kwargs) -> Dict[str, Any]:
     if kwargs_fn:
         kwarg_overrides = kwargs_fn()
         kwargs.update(kwarg_overrides)
@@ -718,8 +532,7 @@ def _open_file_with_retry(
     """
     if OPEN_FILE_MAX_ATTEMPTS < 1:
         raise ValueError(
-            "OPEN_FILE_MAX_ATTEMPTS cannot be negative or 0. Get: "
-            f"{OPEN_FILE_MAX_ATTEMPTS}"
+            "OPEN_FILE_MAX_ATTEMPTS cannot be negative or 0. Get: " f"{OPEN_FILE_MAX_ATTEMPTS}"
         )
 
     return call_with_retry(

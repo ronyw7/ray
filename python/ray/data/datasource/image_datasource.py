@@ -34,7 +34,8 @@ class ImageDatasource(FileBasedDatasource):
     _WRITE_FILE_PER_ROW = True
     _FILE_EXTENSIONS = ["png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif"]
     # Use 8 threads per task to read image files.
-    _NUM_THREADS_PER_TASK = 8
+    # _NUM_THREADS_PER_TASK = 8
+    _NUM_THREADS_PER_TASK = 0  
 
     def __init__(
         self,
@@ -88,13 +89,18 @@ class ImageDatasource(FileBasedDatasource):
         if self.mode is not None:
             image = image.convert(self.mode)
 
-        builder = DelegatingBlockBuilder()
+        # builder = DelegatingBlockBuilder()
         array = np.array(image)
-        item = {"image": array}
-        builder.add(item)
-        block = builder.build()
+        # item = {"image": array}
+        # builder.add(item)
+        # block = builder.build()
+        # import pyarrow
+        # from ray.data.extensions.tensor_extension import ArrowTensorArray
 
-        yield block
+        # block = pyarrow.Table.from_pydict({"image": ArrowTensorArray.from_numpy([array], "image")})
+
+        # yield block
+        yield array
 
     def _rows_per_file(self):
         return 1
@@ -149,8 +155,7 @@ class ImageDatasource(FileBasedDatasource):
         sampling_duration = time.perf_counter() - start_time
         if sampling_duration > 5:
             logger.warn(
-                "Image input size estimation took "
-                f"{round(sampling_duration, 2)} seconds."
+                "Image input size estimation took " f"{round(sampling_duration, 2)} seconds."
             )
         logger.debug(f"Estimated image encoding ratio from sampling is {ratio}.")
         return max(ratio, IMAGE_ENCODING_RATIO_ESTIMATE_LOWER_BOUND)
