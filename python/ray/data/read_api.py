@@ -309,7 +309,7 @@ def read_datasource(
     ray_remote_args: Dict[str, Any] = None,
     concurrency: Optional[int] = None,
     override_num_blocks: Optional[int] = None,
-    **read_args,
+    **rgs,
 ) -> Dataset:
     """Read a stream from a custom :class:`~ray.data.Datasource`.
 
@@ -790,6 +790,7 @@ def read_images(
     file_extensions: Optional[List[str]] = ImageDatasource._FILE_EXTENSIONS,
     concurrency: Optional[int] = None,
     override_num_blocks: Optional[int] = None,
+    transform: Optional[Callable] = None, # @ron
 ) -> Dataset:
     """Creates a :class:`~ray.data.Dataset` from image files.
 
@@ -913,6 +914,7 @@ def read_images(
         ignore_missing_paths=ignore_missing_paths,
         shuffle=shuffle,
         file_extensions=file_extensions,
+        transform=transform # @ron
     )
     return read_datasource(
         datasource,
