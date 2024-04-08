@@ -4,7 +4,7 @@ import click
 
 from ci.ray_ci.utils import logger, ci_init
 from ci.ray_ci.tester_container import TesterContainer
-from release.ray_release.configs.global_config import BRANCH_PIPELINES
+from ray_release.configs.global_config import BRANCH_PIPELINES
 
 
 @click.command()
@@ -22,6 +22,7 @@ def main(team: str, bazel_log_dir: str) -> None:
         return
 
     TesterContainer.upload_test_results(team, bazel_log_dir)
+    TesterContainer.move_test_state(team, bazel_log_dir)
 
 
 if __name__ == "__main__":
