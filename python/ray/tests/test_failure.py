@@ -3,6 +3,7 @@ import signal
 import sys
 import time
 import logging
+import threading
 
 import numpy as np
 import pytest
@@ -106,7 +107,7 @@ def test_get_throws_quickly_when_found_exception(ray_start_regular):
     def expect_exception(objects, exception):
         with pytest.raises(ray.exceptions.RayError) as err:
             ray.get(objects)
-        assert err.type is exception
+        assert issubclass(err.type, exception)
 
     signal1 = SignalActor.remote()
     actor = Actor.options(max_concurrency=2).remote()
@@ -598,6 +599,25 @@ def test_actor_failover_with_bad_network(ray_start_cluster_head):
 
     # We should be able to get the return value of task 2 without any issue
     ray.get(obj2)
+
+
+# Previously when threading.Lock is in the exception, it causes
+# the serialization to fail. This test case is to cover that scenario.
+def test_unserializable_exception(ray_start_regular, propagate_logs):
+    class UnserializableException(Exception):
+        def __init__(self):
+            self.lock = threading.Lock()
+
+    @ray.remote
+    def func():
+        raise UnserializableException
+
+    with pytest.raises(ray.exceptions.RayTaskError) as exc_info:
+        ray.get(func.remote())
+
+    assert isinstance(exc_info.value, ray.exceptions.RayTaskError)
+    assert isinstance(exc_info.value.cause, ray.exceptions.RayError)
+    assert "isn't serializable" in str(exc_info.value.cause)
 
 
 def test_final_user_exception(ray_start_regular, propagate_logs, caplog):
