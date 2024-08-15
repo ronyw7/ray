@@ -41,6 +41,7 @@ class _SystemMetricsLogger:
         self.headers = [
             "timestamp",  # timestamp
             "cpu_usage",  # psutil
+            "cpu_usage_per_cpu",  # psutil
             "memory_usage",  # psutil
             "memory_available",  # psutil
             "disk_usage",  # psutil
@@ -78,7 +79,8 @@ class _SystemMetricsLogger:
         # Note that `psutil.cpu_percent` can also report per-cpu usage by setting `percpu=True`
         csv_data = {
             "timestamp": time.time(),
-            "cpu_usage": psutil.cpu_percent(interval=0.5),
+            "cpu_usage": psutil.cpu_percent(interval=None),
+            "cpu_usage_per_cpu": psutil.cpu_percent(interval=None, percpu=True),
             "memory_usage": virtual_memory.percent,
             "memory_available": virtual_memory.available,
             "disk_usage": disk_usage.percent,
@@ -117,6 +119,7 @@ class _SystemMetricsLogger:
     def _write_log(self, data):
         logging.info(f"Timestamp: {data['timestamp']}")
         logging.info(f"CPU Usage: {data['cpu_usage']}%")
+        logging.info(f"CPU Usage (per CPU): {data['cpu_usage_per_cpu']}")
         logging.info(
             f"Memory Usage: {data['memory_usage']}%, Available: {data['memory_available']} MiB"
         )
@@ -144,6 +147,6 @@ class _SystemMetricsLogger:
 
 if __name__ == "__main__":
     logger = _SystemMetricsLogger(
-        csv_path="temp_1.csv", log_path="temp_1.log", interval=5
+        csv_path="temp_1.csv", log_path="temp_1.log", interval=1
     )
     logger.log_metrics()
