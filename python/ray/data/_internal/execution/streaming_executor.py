@@ -122,6 +122,7 @@ class StreamingExecutor(Executor, threading.Thread):
 
         # Setup the streaming DAG topology and start the runner thread.
         self._topology, _ = build_streaming_topology(dag, self._options)
+        print("[Topology]", self._topology, flush=True)
         self._resource_manager = ResourceManager(
             self._topology,
             self._options,

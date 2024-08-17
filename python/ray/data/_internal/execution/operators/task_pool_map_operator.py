@@ -1,4 +1,5 @@
 from typing import Any, Callable, Dict, Optional
+import time
 
 import ray
 from ray.data._internal.execution.interfaces import (
@@ -62,6 +63,7 @@ class TaskPoolMapOperator(MapOperator):
             ray_remote_args,
         )
         self._concurrency = concurrency
+        self._last_output_time = time.time()
 
     def _add_bundled_input(self, bundle: RefBundle):
         # Submit the task as a normal Ray task.
@@ -88,7 +90,19 @@ class TaskPoolMapOperator(MapOperator):
             ctx,
             *bundle.block_refs,
         )
-        self._submit_data_task(gen, bundle)
+        current_time = time.time()
+        if self._last_output_time:
+            stall_time = current_time - self._last_output_time
+            print(f"[{self.name} Data Stall Time]", stall_time, flush=True)
+
+        def _task_done_callback():
+            self._last_output_time = time.time()
+
+        self._submit_data_task(
+            gen,
+            bundle,
+            lambda: _task_done_callback(),
+        )
 
     def shutdown(self):
         # Cancel all active tasks.
