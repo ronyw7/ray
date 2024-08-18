@@ -18,7 +18,7 @@ GiB = 1024 * MiB
 TiB = 1024 * GiB
 
 
-class _SystemMetricsLogger:
+class SystemMetricsLogger:
     """
     Utility class for collecting various system metrics:
     CPU usage, memory usage, available memory,
@@ -32,11 +32,17 @@ class _SystemMetricsLogger:
     >> logger.log_metrics()
     """
 
-    def __init__(self, csv_path: str, log_path: str, interval: int = 1):
+    def __init__(
+        self,
+        csv_path: str = "system_metrics_logger_temp.csv",
+        log_path: str = "system_metrics_logger_temp.txt",
+        interval: int = 1,
+    ):
         self.csv_path = csv_path
         self.log_path = log_path
         self.interval = interval
         self.initial_net_io = psutil.net_io_counters()
+        self.last_collection_time = time.time()
 
         self.headers = [
             "timestamp",  # timestamp
@@ -102,6 +108,8 @@ class _SystemMetricsLogger:
         beautify_data["disk_free"] /= GiB
         beautify_data["network_sent"] /= MiB
         beautify_data["network_received"] /= MiB
+
+        self.last_collection_time = time.time()
         return csv_data, beautify_data
 
     def log_metrics(self):
@@ -144,9 +152,12 @@ class _SystemMetricsLogger:
                 f"GPU {idx} Utilization: {gpu_utilization}%, Memory Used: {gpu_memory} MiB\n"
             )
 
+    def should_collect(self) -> bool:
+        return time.time() - self.last_collection_time >= self.interval
+
 
 if __name__ == "__main__":
-    logger = _SystemMetricsLogger(
+    logger = SystemMetricsLogger(
         csv_path="temp_1.csv", log_path="temp_1.log", interval=1
     )
     logger.log_metrics()

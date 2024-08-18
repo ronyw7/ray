@@ -4,6 +4,7 @@ import time
 import uuid
 from typing import Dict, Iterator, List, Optional
 
+from ray.data._internal.execution.system_metrics_logger import SystemMetricsLogger
 from ray.data._internal.execution.autoscaler import create_autoscaler
 from ray.data._internal.execution.backpressure_policy import (
     BackpressurePolicy,
@@ -81,6 +82,8 @@ class StreamingExecutor(Executor, threading.Thread):
         self._num_errored_blocks = 0
 
         self._last_debug_log_time = 0
+
+        self._sys_metrics_logger = SystemMetricsLogger(interval=5)
 
         Executor.__init__(self, options)
         thread_name = f"StreamingExecutor-{self._execution_id}"
@@ -228,6 +231,9 @@ class StreamingExecutor(Executor, threading.Thread):
         try:
             # Run scheduling loop until complete.
             while True:
+                if self._sys_metrics_logger.should_collect():
+                    data, _ = self._sys_metrics_logger.log_once()
+                    print(data, flush=True)
                 t_start = time.process_time()
                 # use process_time to avoid timing ray.wait in _scheduling_loop_step
                 continue_sched = self._scheduling_loop_step(self._topology)

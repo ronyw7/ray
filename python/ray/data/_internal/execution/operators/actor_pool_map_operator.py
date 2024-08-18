@@ -178,7 +178,9 @@ class ActorPoolMapOperator(MapOperator):
         current_time = time.time()
         if self._last_output_time:
             stall_time = current_time - self._last_output_time
-            print(f"[{self.name} Data Stall Time]", stall_time, flush=True)
+            print(
+                f"[{self.name} Data Stall Time]", current_time, stall_time, flush=True
+            )
         self._bundle_queue.append(bundle)
         self._metrics.on_input_queued(bundle)
         # Try to dispatch all bundles in the queue, including this new bundle.

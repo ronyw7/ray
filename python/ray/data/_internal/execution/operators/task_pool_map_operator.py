@@ -93,7 +93,9 @@ class TaskPoolMapOperator(MapOperator):
         current_time = time.time()
         if self._last_output_time:
             stall_time = current_time - self._last_output_time
-            print(f"[{self.name} Data Stall Time]", stall_time, flush=True)
+            print(
+                f"[{self.name} Data Stall Time]", current_time, stall_time, flush=True
+            )
 
         def _task_done_callback():
             self._last_output_time = time.time()
