@@ -83,7 +83,7 @@ class StreamingExecutor(Executor, threading.Thread):
 
         self._last_debug_log_time = 0
 
-        self._sys_metrics_logger = SystemMetricsLogger(interval=5)
+        self._sys_metrics_logger = SystemMetricsLogger(interval=1)
 
         Executor.__init__(self, options)
         thread_name = f"StreamingExecutor-{self._execution_id}"

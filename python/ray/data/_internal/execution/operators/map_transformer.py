@@ -53,8 +53,7 @@ class MapTransformFn:
         self,
         input: Iterable[MapTransformFnData],
         ctx: TaskContext,
-    ) -> Iterable[MapTransformFnData]:
-        ...
+    ) -> Iterable[MapTransformFnData]: ...
 
     @property
     def input_type(self) -> MapTransformFnDataType:
@@ -93,6 +92,11 @@ class MapTransformer:
         self._init_fn = init_fn if init_fn is not None else lambda: None
         self._target_max_block_size = None
         self._udf_time = 0
+        self._last_output_time = None
+        self._name = None
+
+    def set_name(self, name: str):
+        self._name = name
 
     def set_transform_fns(self, transform_fns: List[MapTransformFn]) -> None:
         """Set the transform functions."""
@@ -132,7 +136,28 @@ class MapTransformer:
             try:
                 start = time.perf_counter()
                 output = next(input)
-                self._udf_time += time.perf_counter() - start
+
+                if self._last_output_time:
+                    print(
+                        f"[{self._name} UDF Transform Data Stall Time]",
+                        start,
+                        (start - self._last_output_time),
+                        flush=True,
+                    )
+
+                end = time.perf_counter()
+                self._last_output_time = end
+                output_keys = list(output.keys())
+                num_rows = len(output[output_keys[0]])
+                print(
+                    f"[{self._name} UDF Transform Wall Time]",
+                    end,  # Timestamp
+                    (end - start),  # Wall Time
+                    num_rows / (end - start),  # Tput
+                    flush=True,
+                )
+                print(num_rows)
+                self._udf_time += end - start
                 yield output
             except StopIteration:
                 break

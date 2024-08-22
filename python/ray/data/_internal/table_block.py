@@ -121,6 +121,8 @@ class TableBlockBuilder(BlockBuilder):
         return self._concat_would_copy() and len(self._tables) > 1
 
     def build(self) -> Block:
+        # import time
+        # start = time.perf_counter()
         columns = {
             key: convert_udf_returns_to_numpy(col) for key, col in self._columns.items()
         }
@@ -129,6 +131,8 @@ class TableBlockBuilder(BlockBuilder):
         else:
             tables = []
         tables.extend(self._tables)
+        # end = time.perf_counter()
+        # print(f"[TableBlockBuilder] {end-start}")
         if len(tables) > 0:
             return self._concat_tables(tables)
         else:

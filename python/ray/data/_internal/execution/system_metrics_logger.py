@@ -42,7 +42,7 @@ class SystemMetricsLogger:
         self.log_path = log_path
         self.interval = interval
         self.initial_net_io = psutil.net_io_counters()
-        self.last_collection_time = time.time()
+        self.last_collection_time = time.perf_counter()
 
         self.headers = [
             "timestamp",  # timestamp
@@ -84,7 +84,7 @@ class SystemMetricsLogger:
 
         # Note that `psutil.cpu_percent` can also report per-cpu usage by setting `percpu=True`
         csv_data = {
-            "timestamp": time.time(),
+            "timestamp": time.perf_counter(),
             "cpu_usage": psutil.cpu_percent(interval=None),
             "cpu_usage_per_cpu": psutil.cpu_percent(interval=None, percpu=True),
             "memory_usage": virtual_memory.percent,
@@ -109,7 +109,7 @@ class SystemMetricsLogger:
         beautify_data["network_sent"] /= MiB
         beautify_data["network_received"] /= MiB
 
-        self.last_collection_time = time.time()
+        self.last_collection_time = time.perf_counter()
         return csv_data, beautify_data
 
     def log_metrics(self):
@@ -153,7 +153,7 @@ class SystemMetricsLogger:
             )
 
     def should_collect(self) -> bool:
-        return time.time() - self.last_collection_time >= self.interval
+        return time.perf_counter() - self.last_collection_time >= self.interval
 
 
 if __name__ == "__main__":

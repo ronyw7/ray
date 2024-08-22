@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
+import numpy as np
+import time
 
 from ray.data._internal.arrow_block import ArrowBlockBuilder
 from ray.data.datasource.file_based_datasource import FileBasedDatasource
@@ -12,8 +14,31 @@ class BinaryDatasource(FileBasedDatasource):
 
     _COLUMN_NAME = "bytes"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._last_output_time = None
+
     def _read_stream(self, f: "pyarrow.NativeFile", path: str):
+        start_time = time.perf_counter()
+        if self._last_output_time:
+            print(
+                f"[{self.get_name()} Data Stall Time]",
+                start_time,  # Timestamp
+                (start_time - self._last_output_time),  # Data Stall Time
+                flush=True,
+            )
+
         data = f.readall()
+        end_time = time.perf_counter()
+        print(
+            f"[{self.get_name()} Wall Time]",
+            end_time,  # Timestamp
+            (end_time - start_time),  # Wall Time
+            self._rows_per_file() / (end_time - start_time),  # Tput
+            flush=True,
+        )
+
+        self._last_output_time = end_time
 
         builder = ArrowBlockBuilder()
         item = {self._COLUMN_NAME: data}

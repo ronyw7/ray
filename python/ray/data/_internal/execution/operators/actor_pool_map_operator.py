@@ -109,7 +109,7 @@ class ActorPoolMapOperator(MapOperator):
         self._actor_pool = _ActorPool(compute_strategy, self._start_actor)
         # A queue of bundles awaiting dispatch to actors.
         self._bundle_queue = collections.deque()
-        self._last_output_time = time.time()
+        # self._last_output_time = None
         # Cached actor class.
         self._cls = None
         # Whether no more submittable bundles will be added.
@@ -175,12 +175,13 @@ class ActorPoolMapOperator(MapOperator):
         return actor, res_ref
 
     def _add_bundled_input(self, bundle: RefBundle):
-        current_time = time.time()
-        if self._last_output_time:
-            stall_time = current_time - self._last_output_time
-            print(
-                f"[{self.name} Data Stall Time]", current_time, stall_time, flush=True
-            )
+        # current_time = time.perf_counter()
+        # print(f"[{self.name} Num Rows]", bundle.num_rows(), flush=True)
+        # if self._last_output_time:
+        #     stall_time = current_time - self._last_output_time
+        #     print(
+        #         f"[{self.name} Data Stall Time]", current_time, stall_time, flush=True
+        #     )
         self._bundle_queue.append(bundle)
         self._metrics.on_input_queued(bundle)
         # Try to dispatch all bundles in the queue, including this new bundle.
@@ -218,7 +219,7 @@ class ActorPoolMapOperator(MapOperator):
             ).remote(DataContext.get_current(), ctx, *input_blocks)
 
             def _task_done_callback(actor_to_return):
-                self._last_output_time = time.time()
+                # self._last_output_time = time.perf_counter()
                 # Return the actor that was running the task to the pool.
                 self._actor_pool.return_actor(actor_to_return)
                 # Dipsatch more tasks.
