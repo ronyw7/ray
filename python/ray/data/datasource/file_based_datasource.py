@@ -225,6 +225,7 @@ class FileBasedDatasource(Datasource):
                             block = block_accessor.append_column(
                                 "path", [read_path] * block_accessor.num_rows()
                             )
+                        # print("NUM_ROWS_READ:", BlockAccessor.for_block(block).num_rows(), flush=True)
                         yield block
 
         def create_read_task_fn(read_paths, num_threads):

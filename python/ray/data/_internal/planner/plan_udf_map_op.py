@@ -5,6 +5,7 @@ import queue
 from threading import Thread
 from types import GeneratorType
 from typing import Any, Callable, Iterable, Iterator, List, Optional
+import time
 
 import numpy as np
 import pandas as pd
@@ -369,9 +370,26 @@ def _generate_transform_fn_for_map_rows(
     fn: UserDefinedFunction,
 ) -> MapTransformCallable[Row, Row]:
     def transform_fn(rows: Iterable[Row], _: TaskContext) -> Iterable[Row]:
+        # last_output_time = None
         for row in rows:
+            start = time.perf_counter()
+            # if last_output_time:
+            #     print(
+            #         "[Preprocess Data Stall Time]",
+            #         start,
+            #         start - last_output_time,
+            #     )
             out_row = fn(row)
             _validate_row_output(out_row)
+            end = time.perf_counter()
+            print(
+                "[Preprocess Wall Time]",
+                end,
+                (end - start),  # Wall Time
+                1,  # Num Rows
+            )
+
+            # last_output_time = end
             yield out_row
 
     return transform_fn
@@ -448,7 +466,7 @@ def _create_map_transformer_for_row_based_map_op(
 
 def generate_map_rows_fn(
     target_max_block_size: int,
-) -> (Callable[[Iterator[Block], TaskContext, UserDefinedFunction], Iterator[Block]]):
+) -> Callable[[Iterator[Block], TaskContext, UserDefinedFunction], Iterator[Block]]:
     """Generate function to apply the UDF to each record of blocks."""
     context = DataContext.get_current()
 
@@ -468,7 +486,7 @@ def generate_map_rows_fn(
 
 def generate_flat_map_fn(
     target_max_block_size: int,
-) -> (Callable[[Iterator[Block], TaskContext, UserDefinedFunction], Iterator[Block]]):
+) -> Callable[[Iterator[Block], TaskContext, UserDefinedFunction], Iterator[Block]]:
     """Generate function to apply the UDF to each record of blocks,
     and then flatten results.
     """
@@ -491,7 +509,7 @@ def generate_flat_map_fn(
 
 def generate_filter_fn(
     target_max_block_size: int,
-) -> (Callable[[Iterator[Block], TaskContext, UserDefinedFunction], Iterator[Block]]):
+) -> Callable[[Iterator[Block], TaskContext, UserDefinedFunction], Iterator[Block]]:
     """Generate function to apply the UDF to each record of blocks,
     and filter out records that do not satisfy the given predicate.
     """

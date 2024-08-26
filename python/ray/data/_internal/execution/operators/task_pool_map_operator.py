@@ -63,6 +63,7 @@ class TaskPoolMapOperator(MapOperator):
             ray_remote_args,
         )
         self._concurrency = concurrency
+        self._map_transformer.set_name(self._name)
         # self._concurrency = 4
         # self._last_output_time = None
 
@@ -100,7 +101,8 @@ class TaskPoolMapOperator(MapOperator):
         #     )
 
         # def _task_done_callback():
-        #     self._last_output_time = time.perf_counter()
+            # self._last_output_time = time.perf_counter()
+            # print(self.name, "num_active_tasks", self.num_active_tasks(), flush=True)
 
         self._submit_data_task(
             gen,

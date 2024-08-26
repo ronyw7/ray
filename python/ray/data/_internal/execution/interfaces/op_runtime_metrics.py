@@ -286,6 +286,7 @@ class OpRuntimeMetrics:
         self._extra_metrics: Dict[str, Any] = {}
         # Start time of current pause due to task submission backpressure
         self._task_submission_backpressure_start_time = -1
+        # self._last_output_time = None
 
     @property
     def extra_metrics(self) -> Dict[str, Any]:
@@ -414,6 +415,13 @@ class OpRuntimeMetrics:
 
     def on_input_queued(self, input: RefBundle):
         """Callback when the operator queues an input."""
+        # if self._last_output_time:
+        #     print(
+        #         "[OpRuntimeMetrics Data Stall]",
+        #         self._op.name,
+        #         time.perf_counter() - self._last_output_time,
+        #         flush=True,
+        #     )
         self.obj_store_mem_internal_inqueue_blocks += len(input.blocks)
         self.obj_store_mem_internal_inqueue += input.size_bytes()
 
@@ -430,11 +438,13 @@ class OpRuntimeMetrics:
 
     def on_output_queued(self, output: RefBundle):
         """Callback when an output is queued by the operator."""
+        # self._last_output_time = time.perf_counter()
         self.obj_store_mem_internal_outqueue_blocks += len(output.blocks)
         self.obj_store_mem_internal_outqueue += output.size_bytes()
 
     def on_output_dequeued(self, output: RefBundle):
         """Callback when an output is dequeued by the operator."""
+        # self._last_output_time = time.perf_counter()
         self.obj_store_mem_internal_outqueue_blocks -= len(output.blocks)
         output_size = output.size_bytes()
         self.obj_store_mem_internal_outqueue -= output_size
@@ -462,6 +472,13 @@ class OpRuntimeMetrics:
 
     def on_task_submitted(self, task_index: int, inputs: RefBundle):
         """Callback when the operator submits a task."""
+        # if self._last_output_time:
+        #     print(
+        #         "[OpRuntimeMetrics Data Stall]",
+        #         self._op.name,
+        #         time.perf_counter() - self._last_output_time,
+        #         flush=True,
+        #     )
         self.num_tasks_submitted += 1
         self.num_tasks_running += 1
         self.bytes_inputs_of_submitted_tasks += inputs.size_bytes()
