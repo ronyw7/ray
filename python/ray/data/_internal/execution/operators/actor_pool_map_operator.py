@@ -23,6 +23,9 @@ from ray.data.block import Block, BlockMetadata
 from ray.data.context import DataContext
 from ray.types import ObjectRef
 
+# @ronyw
+from ray.data._internal.execution.prometheus_monitoring_service import record_metrics
+
 logger = logging.getLogger(__name__)
 
 # Higher values here are better for prefetching and locality. It's ok for this to be
@@ -110,10 +113,6 @@ class ActorPoolMapOperator(MapOperator):
         # A queue of bundles awaiting dispatch to actors.
         self._bundle_queue = collections.deque()
 
-        # self._last_output_time = None
-        self._curr_submit_time = None
-        self._curr_num_rows = None
-
         # Cached actor class.
         self._cls = None
         # Whether no more submittable bundles will be added.
@@ -179,14 +178,6 @@ class ActorPoolMapOperator(MapOperator):
         return actor, res_ref
 
     def _add_bundled_input(self, bundle: RefBundle):
-        current_time = time.perf_counter()
-        self._curr_submit_time = current_time
-        self._curr_num_rows = bundle.num_rows()
-        # if self._last_output_time:
-        #     stall_time = current_time - self._last_output_time
-        #     print(
-        #         f"[{self.name} Data Stall Time]", current_time, stall_time, flush=True
-        #     )
         self._bundle_queue.append(bundle)
         self._metrics.on_input_queued(bundle)
         # Try to dispatch all bundles in the queue, including this new bundle.
@@ -224,15 +215,6 @@ class ActorPoolMapOperator(MapOperator):
             ).remote(DataContext.get_current(), ctx, *input_blocks)
 
             def _task_done_callback(actor_to_return):
-                end_time = time.perf_counter()
-                # self._last_output_time = end_time
-                print(
-                    f"[{self.name} Wall Time]",
-                    end_time,
-                    end_time - self._curr_submit_time,  # Wall Time
-                    self._curr_num_rows,  # Num Rows
-                    flush=True,
-                )
                 # Return the actor that was running the task to the pool.
                 self._actor_pool.return_actor(actor_to_return)
                 # Dipsatch more tasks.

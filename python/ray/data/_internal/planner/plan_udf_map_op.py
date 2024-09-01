@@ -47,6 +47,9 @@ from ray.data.context import DataContext
 from ray.data.exceptions import UserCodeException
 from ray.util.rpdb import _is_ray_debugger_enabled
 
+# @ronyw
+from ray.data._internal.execution.prometheus_monitoring_service import record_metrics
+
 
 class _MapActorContext:
     def __init__(
@@ -280,7 +283,20 @@ def _generate_transform_fn_for_map_batches(
                         # operators output empty blocks with no schema.
                         res = [batch]
                     else:
+                        # Takes around 0.0002 seconds (negligible)
+                        num_rows = BlockAccessor.for_block(
+                            BlockAccessor.batch_to_arrow_block(batch)
+                        ).num_rows()
+
+                        start = time.perf_counter()
                         res = fn(batch)
+                        end = time.perf_counter()
+                        print(
+                            "[Inference Wall Time]",
+                            end,
+                            (end - start),  # Wall Time
+                            num_rows,  # Num Rows
+                        )
                         if not isinstance(res, GeneratorType):
                             res = [res]
                 except ValueError as e:
@@ -370,15 +386,8 @@ def _generate_transform_fn_for_map_rows(
     fn: UserDefinedFunction,
 ) -> MapTransformCallable[Row, Row]:
     def transform_fn(rows: Iterable[Row], _: TaskContext) -> Iterable[Row]:
-        # last_output_time = None
         for row in rows:
             start = time.perf_counter()
-            # if last_output_time:
-            #     print(
-            #         "[Preprocess Data Stall Time]",
-            #         start,
-            #         start - last_output_time,
-            #     )
             out_row = fn(row)
             _validate_row_output(out_row)
             end = time.perf_counter()
@@ -388,8 +397,7 @@ def _generate_transform_fn_for_map_rows(
                 (end - start),  # Wall Time
                 1,  # Num Rows
             )
-
-            # last_output_time = end
+            record_metrics("Preprocess", 1, end - start)
             yield out_row
 
     return transform_fn

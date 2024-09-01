@@ -33,6 +33,9 @@ from ray.data._internal.progress_bar import ProgressBar
 from ray.data._internal.stats import DatasetStats, StatsManager
 from ray.data.context import OK_PREFIX, WARN_PREFIX, DataContext
 
+# @ronyw
+from ray.data._internal.execution.prometheus_monitoring_service import start_monitoring_server
+
 logger = logging.getLogger(__name__)
 
 # Force a progress bar update after this many events processed . This avoids the
@@ -88,6 +91,7 @@ class StreamingExecutor(Executor, threading.Thread):
         Executor.__init__(self, options)
         thread_name = f"StreamingExecutor-{self._execution_id}"
         threading.Thread.__init__(self, daemon=True, name=thread_name)
+        start_monitoring_server()
 
     def execute(
         self, dag: PhysicalOperator, initial_stats: Optional[DatasetStats] = None

@@ -1,9 +1,11 @@
-from typing import TYPE_CHECKING, List, Optional
-import numpy as np
+from typing import TYPE_CHECKING
 import time
 
 from ray.data._internal.arrow_block import ArrowBlockBuilder
 from ray.data.datasource.file_based_datasource import FileBasedDatasource
+
+# @ronyw
+from ray.data._internal.execution.prometheus_monitoring_service import record_metrics
 
 if TYPE_CHECKING:
     import pyarrow
@@ -16,18 +18,9 @@ class BinaryDatasource(FileBasedDatasource):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # self._last_output_time = None
 
     def _read_stream(self, f: "pyarrow.NativeFile", path: str):
         start_time = time.perf_counter()
-        # if self._last_output_time:
-        #     print(
-        #         f"[{self.get_name()} Data Stall Time]",
-        #         start_time,  # Timestamp
-        #         (start_time - self._last_output_time),  # Data Stall Time
-        #         flush=True,
-        #     )
-
         data = f.readall()
         end_time = time.perf_counter()
         print(
@@ -37,8 +30,7 @@ class BinaryDatasource(FileBasedDatasource):
             self._rows_per_file(),  # Num Rows
             flush=True,
         )
-
-        # self._last_output_time = end_time
+        record_metrics("ReadBinary", self._rows_per_file(), end_time - start_time)
 
         builder = ArrowBlockBuilder()
         item = {self._COLUMN_NAME: data}
