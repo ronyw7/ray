@@ -23,9 +23,6 @@ from ray.data.block import Block, BlockMetadata
 from ray.data.context import DataContext
 from ray.types import ObjectRef
 
-# @ronyw
-from ray.data._internal.execution.prometheus_monitoring_service import record_metrics
-
 logger = logging.getLogger(__name__)
 
 # Higher values here are better for prefetching and locality. It's ok for this to be

@@ -47,8 +47,8 @@ from ray.data.context import DataContext
 from ray.data.exceptions import UserCodeException
 from ray.util.rpdb import _is_ray_debugger_enabled
 
-# @ronyw
-from ray.data._internal.execution.prometheus_monitoring_service import record_metrics
+from ray.data._internal.execution.pipeline_metrics_tracker import PipelineMetricsTracker
+from ray.runtime_context import RuntimeContext
 
 
 class _MapActorContext:
@@ -297,6 +297,16 @@ def _generate_transform_fn_for_map_batches(
                             (end - start),  # Wall Time
                             num_rows,  # Num Rows
                         )
+                        tracker = PipelineMetricsTracker.options(
+                            name="tracker", get_if_exists=True
+                        ).remote()
+                        tracker.record.remote(
+                            stage="inference",
+                            pid=ray.get_runtime_context().get_worker_id(),
+                            end_time=end,
+                            wall_time=(end - start),
+                            num_rows=num_rows,
+                        )
                         if not isinstance(res, GeneratorType):
                             res = [res]
                 except ValueError as e:
@@ -397,7 +407,16 @@ def _generate_transform_fn_for_map_rows(
                 (end - start),  # Wall Time
                 1,  # Num Rows
             )
-            record_metrics("Preprocess", 1, end - start)
+            tracker = PipelineMetricsTracker.options(
+                name="tracker", get_if_exists=True
+            ).remote()
+            tracker.record.remote(
+                stage="preprocess",
+                pid=ray.get_runtime_context().get_worker_id(),
+                end_time=end,
+                wall_time=(end - start),
+                num_rows=1,
+            )
             yield out_row
 
     return transform_fn

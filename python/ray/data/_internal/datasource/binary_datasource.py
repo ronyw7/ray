@@ -4,8 +4,8 @@ import time
 from ray.data._internal.arrow_block import ArrowBlockBuilder
 from ray.data.datasource.file_based_datasource import FileBasedDatasource
 
-# @ronyw
-from ray.data._internal.execution.prometheus_monitoring_service import record_metrics
+from ray.data._internal.execution.pipeline_metrics_tracker import PipelineMetricsTracker
+import ray
 
 if TYPE_CHECKING:
     import pyarrow
@@ -30,7 +30,16 @@ class BinaryDatasource(FileBasedDatasource):
             self._rows_per_file(),  # Num Rows
             flush=True,
         )
-        record_metrics("ReadBinary", self._rows_per_file(), end_time - start_time)
+        tracker = PipelineMetricsTracker.options(
+            name="tracker", get_if_exists=True
+        ).remote()
+        tracker.record.remote(
+            stage="read",
+            pid=ray.get_runtime_context().get_worker_id(),
+            end_time=end_time,
+            wall_time=(end_time - start_time),
+            num_rows=self._rows_per_file(),
+        )
 
         builder = ArrowBlockBuilder()
         item = {self._COLUMN_NAME: data}
