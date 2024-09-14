@@ -198,7 +198,7 @@ class ScalingRequest:
 
 
 class PipelineBottleneckAnalyzer:
-    def __init__(self, interval=30):
+    def __init__(self, interval=20):
         self.interval = interval
         self.last_analysis_time = time.perf_counter()
 
@@ -239,6 +239,8 @@ class PipelineResourceScaler:
         print(list_nodes())
 
         additional_num_pids = int(self.request.additional_num_pids)
+        # ray.init() does not expose necessary ports for other workers to join
+        # To fix, run `ray start --head` in the terminal and then ray.init("auto") in the script
         ray_start_command = f"ray start --address=10.3.0.4:6379 --num-cpus {additional_num_pids} --num-gpus 0"
 
         try:
