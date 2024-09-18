@@ -5,7 +5,6 @@ import uuid
 from typing import Dict, Iterator, List, Optional
 
 
-from ray.data._internal.execution.system_metrics_logger import SystemMetricsLogger
 from ray.data._internal.execution.autoscaler import create_autoscaler
 from ray.data._internal.execution.backpressure_policy import (
     BackpressurePolicy,

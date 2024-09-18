@@ -291,12 +291,12 @@ def _generate_transform_fn_for_map_batches(
                         start = time.perf_counter()
                         res = fn(batch)
                         end = time.perf_counter()
-                        print(
-                            "[Inference Wall Time]",
-                            end,
-                            (end - start),  # Wall Time
-                            num_rows,  # Num Rows
-                        )
+                        # print(
+                        #     "[Inference Wall Time]",
+                        #     end,
+                        #     (end - start),  # Wall Time
+                        #     num_rows,  # Num Rows
+                        # )
                         tracker = PipelineMetricsTracker.options(
                             name="tracker", get_if_exists=True
                         ).remote()
@@ -401,12 +401,12 @@ def _generate_transform_fn_for_map_rows(
             out_row = fn(row)
             _validate_row_output(out_row)
             end = time.perf_counter()
-            print(
-                "[Preprocess Wall Time]",
-                end,
-                (end - start),  # Wall Time
-                1,  # Num Rows
-            )
+            # print(
+            #     "[Preprocess Wall Time]",
+            #     end,
+            #     (end - start),  # Wall Time
+            #     1,  # Num Rows
+            # )
             tracker = PipelineMetricsTracker.options(
                 name="tracker", get_if_exists=True
             ).remote()

@@ -23,13 +23,13 @@ class BinaryDatasource(FileBasedDatasource):
         start_time = time.perf_counter()
         data = f.readall()
         end_time = time.perf_counter()
-        print(
-            f"[{self.get_name()} Wall Time]",
-            end_time,  # Timestamp
-            (end_time - start_time),  # Wall Time
-            self._rows_per_file(),  # Num Rows
-            flush=True,
-        )
+        # print(
+        #     f"[{self.get_name()} Wall Time]",
+        #     end_time,  # Timestamp
+        #     (end_time - start_time),  # Wall Time
+        #     self._rows_per_file(),  # Num Rows
+        #     flush=True,
+        # )
         tracker = PipelineMetricsTracker.options(
             name="tracker", get_if_exists=True
         ).remote()
