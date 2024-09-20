@@ -116,6 +116,8 @@ class PipelineMetricsTracker:
     def compute_overall_tput(self, start_from=None):
         """Computes the overall tput for the pipeline."""
         raw_metrics = self.get_raw_metrics(start_from=start_from)
+        if "inference" not in raw_metrics.keys():
+            return 0
         end_time = raw_metrics[self.sink_stage_name][-1]["time"]
         num_rows = np.sum([r["rows"] for r in raw_metrics[self.sink_stage_name]])
         start_time = (
@@ -260,10 +262,8 @@ class PipelineBottleneckAnalyzer:
         self.last_analysis_time = time.perf_counter()
 
         self.sink_stage_name = sink_stage_name
-        self.data_stall_threshold = 0.1  # Seconds
-        self.data_stall_compensated = (
-            0  # Number of additional PIDs we've added to compensate for data stall
-        )
+        self.data_stall_threshold = 0.2  # Seconds
+        self.data_stall_compensated = 0  # Number of additional PIDs we've already added to compensate for data stall
 
     def add_metrics(self, metrics: List[PipelineStageMetrics]):
         self.metrics = metrics
@@ -273,46 +273,79 @@ class PipelineBottleneckAnalyzer:
 
     def analyze(self) -> Optional[ScalingRequest]:
         # For now, we only consider the CPU-bound cases; to add support for GPU request later.
-        bottleneck_stage = None
+        bottleneck_stage_by_tput = None
+        bottleneck_stage_by_data_stall = None
+
         lowest_tput = float("inf")
+        lowest_data_stall = float("inf")
 
-        inference_tput = None
+        inference_tput = 0
 
+        # Identify the bottleneck stage by throughput and by data stall time
         for stage in self.metrics:
             if stage.concurrent_tput < lowest_tput:
                 lowest_tput = stage.concurrent_tput
-                bottleneck_stage = stage
+                bottleneck_stage_by_tput = stage
+
+            if stage.mean_data_stall < lowest_data_stall:
+                lowest_data_stall = stage.mean_data_stall
+                bottleneck_stage_by_data_stall = stage
+
             if stage.name == "inference":
                 inference_tput = stage.concurrent_tput
                 inference_data_stall = stage.mean_data_stall
 
-        # Determine the number of additional PIDs needed to optimize the pipeline
-        num_pid_optim = inference_tput // bottleneck_stage.mean_tput + 1
-        if (
-            abs(bottleneck_stage.mean_data_stall - inference_data_stall)
-            > self.data_stall_threshold
-        ):
-            logger.info(
-                f"Data stall detected between {bottleneck_stage.name} and {self.sink_stage_name}."
-            )
-            num_pid_optim += self.data_stall_compensated + 1
-            self.data_stall_compensated += 1
-
-        num_pid_requested = num_pid_optim - bottleneck_stage.num_pids
-
-        # Pipeline metrics summary
-        msg = (
-            "[Analyzed] Bottleneck stage:",
-            bottleneck_stage,
-            "Throughput:",
-            lowest_tput,
-        )
+        # First, optimize along throughput
+        bottleneck_stage = bottleneck_stage_by_tput
         self.last_analysis_time = time.perf_counter()
 
-        if bottleneck_stage.name == self.sink_stage_name:
-            return None, msg
+        if bottleneck_stage.name != self.sink_stage_name:
+            # Throughput is not yet optimized; scale based on throughput bottleneck
+            num_pid_optim = int(inference_tput // bottleneck_stage.mean_tput) + 1
+            num_pid_requested = num_pid_optim - bottleneck_stage.num_pids
 
-        # Final check to ensure the number of PIDs requested does not exceed the number of CPUs
+            msg = (
+                "[Analyzed] Bottleneck stage (throughput):",
+                bottleneck_stage.name,
+                "Throughput:",
+                lowest_tput,
+                "Target Throughput:",
+                inference_tput,
+            )
+
+        else:
+            # Throughput is optimized; now check for data stall times
+            bottleneck_stage = bottleneck_stage_by_data_stall
+
+            data_stall_difference = (
+                inference_data_stall - bottleneck_stage.mean_data_stall
+            )
+
+            if data_stall_difference > self.data_stall_threshold:
+                logger.info(
+                    f"Data stall detected at stage '{bottleneck_stage.name}'. "
+                    f"Mean data stall time: {bottleneck_stage.mean_data_stall}"
+                )
+                num_pid_optim = int(inference_tput // bottleneck_stage.mean_tput) + 1
+                self.data_stall_compensated += 1
+                num_pid_optim += self.data_stall_compensated
+
+                num_pid_requested = 1
+            else:
+                num_pid_requested = 0
+
+            # Pipeline metrics summary
+            msg = (
+                "[Analyzed] Bottleneck stage (data stall):",
+                bottleneck_stage.name,
+                "Data stall time:",
+                bottleneck_stage.mean_data_stall,
+                "Data stall time difference:",
+                data_stall_difference,
+                "Target data stall difference:",
+                self.data_stall_threshold,
+            )
+        # Num PIDs requested should not exceed the number of CPUs
         import psutil
 
         num_cpus = psutil.cpu_count(logical=False)
@@ -321,6 +354,10 @@ class PipelineBottleneckAnalyzer:
                 f"Optimal number of PIDs ({num_pid_optim}) exceeds the number of CPUs ({num_cpus})."
             )
             return None, msg
+        elif num_pid_requested == 0:
+            logger.info("No scaling request generated.")
+            return None, msg
+
         return ScalingRequest("CPU", num_pid_requested), msg
 
 
