@@ -95,7 +95,11 @@ class PipelineMetricsTracker:
 
         # Analysis and scaling logic
         if self.analyzer.should_analyze():
-            self.compute_summary_metrics(start_from=self.last_analysis_time)
+            summary_metrics_computed = self.compute_summary_metrics(
+                start_from=self.last_analysis_time
+            )
+            if not summary_metrics_computed:
+                return
             self.analyzer.add_metrics(self.output_summary_metrics())
             request, msg = self.analyzer.analyze()
             logger.info(msg)
@@ -126,6 +130,8 @@ class PipelineMetricsTracker:
             stall_times = []
 
             events = [event for event in events if event["time"] >= (start_from or 0)]
+            if len(events) <= 1:
+                return False
 
             for i in range(len(events) - 1):
                 current_event = events[i]
@@ -138,9 +144,13 @@ class PipelineMetricsTracker:
                 )
                 stall_times.append(stall_time)
             self.stall_metrics[stage] = stall_times
+        return True
 
     def compute_summary_metrics(self, start_from=None):
-        self.compute_data_stall(start_from=start_from)
+        data_stall_computed = self.compute_data_stall(start_from=start_from)
+        if not data_stall_computed:
+            return False
+
         for stage, events in self.get_raw_metrics(start_from=start_from).items():
             self.summary_metrics[stage] = {
                 "total_wall_time": np.sum([r["wall_time"] for r in events]),
@@ -161,11 +171,12 @@ class PipelineMetricsTracker:
                 * self.summary_metrics[stage]["num_pids"]
             )
 
-        for stage, events in self.stall_metrics.items():
+        for stage, stall_times in self.stall_metrics.items():
             # mean data stall
-            self.summary_metrics[stage]["mean_data_stall"] = np.mean(events)
+            self.summary_metrics[stage]["mean_data_stall"] = np.mean(stall_times)
 
         self.overall_tput = self.compute_overall_tput(start_from=start_from)
+        return True
 
     def output_summary_metrics(self):
         """Generate PipelineStageMetrics objects for each stage in the pipeline."""
@@ -247,7 +258,12 @@ class PipelineBottleneckAnalyzer:
     def __init__(self, interval=20, sink_stage_name="inference"):
         self.interval = interval
         self.last_analysis_time = time.perf_counter()
+
         self.sink_stage_name = sink_stage_name
+        self.data_stall_threshold = 0.1  # Seconds
+        self.data_stall_compensated = (
+            0  # Number of additional PIDs we've added to compensate for data stall
+        )
 
     def add_metrics(self, metrics: List[PipelineStageMetrics]):
         self.metrics = metrics
@@ -268,8 +284,20 @@ class PipelineBottleneckAnalyzer:
                 bottleneck_stage = stage
             if stage.name == "inference":
                 inference_tput = stage.concurrent_tput
+                inference_data_stall = stage.mean_data_stall
 
+        # Determine the number of additional PIDs needed to optimize the pipeline
         num_pid_optim = inference_tput // bottleneck_stage.mean_tput + 1
+        if (
+            abs(bottleneck_stage.mean_data_stall - inference_data_stall)
+            > self.data_stall_threshold
+        ):
+            logger.info(
+                f"Data stall detected between {bottleneck_stage.name} and {self.sink_stage_name}."
+            )
+            num_pid_optim += self.data_stall_compensated + 1
+            self.data_stall_compensated += 1
+
         num_pid_requested = num_pid_optim - bottleneck_stage.num_pids
 
         # Pipeline metrics summary
@@ -284,6 +312,15 @@ class PipelineBottleneckAnalyzer:
         if bottleneck_stage.name == self.sink_stage_name:
             return None, msg
 
+        # Final check to ensure the number of PIDs requested does not exceed the number of CPUs
+        import psutil
+
+        num_cpus = psutil.cpu_count(logical=False)
+        if num_pid_requested > num_cpus:
+            logger.info(
+                f"Optimal number of PIDs ({num_pid_optim}) exceeds the number of CPUs ({num_cpus})."
+            )
+            return None, msg
         return ScalingRequest("CPU", num_pid_requested), msg
 
 
