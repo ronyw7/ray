@@ -129,9 +129,9 @@ class ResourceManager:
             f = (1.0 + num_ops_so_far) / max(1.0, num_ops_total - 1.0)
             num_ops_so_far += 1
             self._downstream_fraction[op] = min(1.0, f)
-            self._downstream_object_store_memory[
-                op
-            ] = self._global_usage.object_store_memory
+            self._downstream_object_store_memory[op] = (
+                self._global_usage.object_store_memory
+            )
 
             # Update operator's object store usage, which is used by
             # DatasetStats and updated on the Ray Data dashboard.
@@ -398,12 +398,14 @@ class ReservationOpResourceAllocator(OpResourceAllocator):
             self._reservation_ratio / (len(eligible_ops))
         )
         for op in eligible_ops:
+            # print("[RESOURCE MANAGER]", op.name)
             # Reserve at least half of the default reserved resources for the outputs.
             # This makes sure that we will have enough budget to pull blocks from the
             # op.
             self._reserved_for_op_outputs[op] = max(
                 default_reserved.object_store_memory / 2, 1.0
             )
+            # print("[RESOURCE MANAGER]", self._reserved_for_op_outputs[op])
             # Calculate the minimum amount of resources to reserve.
             # 1. Make sure the reserved resources are at least to allow one task.
             min_reserved = op.incremental_resource_usage().copy()
@@ -447,6 +449,7 @@ class ReservationOpResourceAllocator(OpResourceAllocator):
                 )
 
             self._total_shared = self._total_shared.max(ExecutionResources.zero())
+        print("[RESOURCE MANAGER]", self._op_reserved)
 
     def can_submit_new_task(self, op: PhysicalOperator) -> bool:
         if op not in self._op_budgets:

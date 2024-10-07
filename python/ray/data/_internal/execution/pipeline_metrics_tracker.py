@@ -10,7 +10,7 @@ from collections import deque
 
 from ray.data._internal.execution.system_metrics_logger import SystemMetricsLogger
 
-LOGGING_FILE = "pipeline_metrics.log"
+LOGGING_FILE = "autoscaler_temp.log"
 logging.basicConfig(
     filename=LOGGING_FILE,
     level=logging.INFO,
@@ -42,7 +42,7 @@ class PipelineMetricsTracker:
         #     System Metrics
         # ------------------------
         self.system_metrics = []
-        self.system_metrics_logger = SystemMetricsLogger(interval=5)
+        self.system_metrics_logger = SystemMetricsLogger(interval=10)
 
         # ------------------------
         # Pipeline Helper Vairables
@@ -262,7 +262,7 @@ class PipelineBottleneckAnalyzer:
         self.last_analysis_time = time.perf_counter()
 
         self.sink_stage_name = sink_stage_name
-        self.data_stall_threshold = 0.2  # Seconds
+        self.data_stall_threshold = 0.15  # Seconds
         self.data_stall_compensated = 0  # Number of additional PIDs we've already added to compensate for data stall
 
     def add_metrics(self, metrics: List[PipelineStageMetrics]):
@@ -275,6 +275,7 @@ class PipelineBottleneckAnalyzer:
         # For now, we only consider the CPU-bound cases; to add support for GPU request later.
         bottleneck_stage_by_tput = None
         bottleneck_stage_by_data_stall = None
+        bottleneck_num_pids = 0
 
         lowest_tput = float("inf")
         lowest_data_stall = float("inf")
@@ -290,6 +291,7 @@ class PipelineBottleneckAnalyzer:
             if stage.mean_data_stall < lowest_data_stall:
                 lowest_data_stall = stage.mean_data_stall
                 bottleneck_stage_by_data_stall = stage
+                bottleneck_num_pids = stage.num_pids
 
             if stage.name == "inference":
                 inference_tput = stage.concurrent_tput
@@ -327,6 +329,7 @@ class PipelineBottleneckAnalyzer:
                     f"Mean data stall time: {bottleneck_stage.mean_data_stall}"
                 )
                 num_pid_optim = int(inference_tput // bottleneck_stage.mean_tput) + 1
+
                 self.data_stall_compensated += 1
                 num_pid_optim += self.data_stall_compensated
 
@@ -349,9 +352,9 @@ class PipelineBottleneckAnalyzer:
         import psutil
 
         num_cpus = psutil.cpu_count(logical=False)
-        if num_pid_requested > num_cpus:
+        if bottleneck_num_pids + num_pid_requested > num_cpus:
             logger.info(
-                f"Optimal number of PIDs ({num_pid_optim}) exceeds the number of CPUs ({num_cpus})."
+                f"Optimal number of PIDs ({bottleneck_num_pids + num_pid_requested}) exceeds the number of CPUs ({num_cpus})."
             )
             return None, msg
         elif num_pid_requested == 0:
@@ -384,9 +387,8 @@ class PipelineResourceScaler:
             logger.info(
                 f"Successfully started {additional_num_pids} workers. Run `ray status` to check the current cluster status."
             )
-
-            time.sleep(5)
             logger.info(f"[Completed] scaling request: {request}")
+            time.sleep(5)
             ray_status_command = "ray status"
             result = subprocess.run(
                 ray_status_command,
