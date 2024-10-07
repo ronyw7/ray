@@ -93,7 +93,7 @@ class FileBasedDatasource(Datasource):
         file_extensions: Optional[List[str]] = None,
     ):
         _check_pyarrow_version()
-
+        print(f"[{self.get_name()}] Launched", flush=True)
         self._supports_distributed_reads = not _is_local_scheme(paths)
         if not self._supports_distributed_reads and ray.util.client.ray.is_connected():
             raise ValueError(
@@ -225,6 +225,7 @@ class FileBasedDatasource(Datasource):
                             block = block_accessor.append_column(
                                 "path", [read_path] * block_accessor.num_rows()
                             )
+                        # print("NUM_ROWS_READ:", BlockAccessor.for_block(block).num_rows(), flush=True)
                         yield block
 
         def create_read_task_fn(read_paths, num_threads):
@@ -235,7 +236,8 @@ class FileBasedDatasource(Datasource):
                 # order even when using multiple threads.
                 if ctx.execution_options.preserve_order:
                     num_threads = 0
-
+                # print(f"[{self.get_name()}] num_threads: {num_threads}", flush=True)
+                # print(ctx.execution_options.preserve_order, flush=True)
                 if num_threads > 0:
                     if len(read_paths) < num_threads:
                         num_threads = len(read_paths)

@@ -1,4 +1,5 @@
 from typing import Any, Callable, Dict, Optional
+# import time
 
 import ray
 from ray.data._internal.execution.interfaces import (
@@ -62,6 +63,9 @@ class TaskPoolMapOperator(MapOperator):
             ray_remote_args,
         )
         self._concurrency = concurrency
+        self._map_transformer.set_name(self._name)
+        # self._concurrency = 4
+        # self._last_output_time = None
 
         # NOTE: Unlike static Ray remote args, dynamic arguments extracted from the
         #       blocks themselves are going to be passed inside `fn.options(...)`
@@ -74,6 +78,7 @@ class TaskPoolMapOperator(MapOperator):
         self._map_task = cached_remote_fn(_map_task, **ray_remote_static_args)
 
     def _add_bundled_input(self, bundle: RefBundle):
+        # print(f"[{self.name} Num Rows]", bundle.num_rows(), flush=True)
         # Submit the task as a normal Ray task.
         ctx = TaskContext(
             task_idx=self._next_data_task_idx,
@@ -98,7 +103,22 @@ class TaskPoolMapOperator(MapOperator):
             ctx,
             *bundle.block_refs,
         )
-        self._submit_data_task(gen, bundle)
+        # current_time = time.perf_counter()
+        # if self._last_output_time:
+        #     stall_time = current_time - self._last_output_time
+        #     print(
+        #         f"[{self.name} Data Stall Time]", current_time, stall_time, flush=True
+        #     )
+
+        # def _task_done_callback():
+            # self._last_output_time = time.perf_counter()
+            # print(self.name, "num_active_tasks", self.num_active_tasks(), flush=True)
+
+        self._submit_data_task(
+            gen,
+            bundle,
+            # lambda: _task_done_callback(),
+        )
 
     def shutdown(self):
         # Cancel all active tasks.
