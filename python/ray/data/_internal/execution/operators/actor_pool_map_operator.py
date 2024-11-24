@@ -1,5 +1,6 @@
 import collections
 import logging
+import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import ray
@@ -108,6 +109,7 @@ class ActorPoolMapOperator(MapOperator):
         self._actor_pool = _ActorPool(compute_strategy, self._start_actor)
         # A queue of bundles awaiting dispatch to actors.
         self._bundle_queue = collections.deque()
+
         # Cached actor class.
         self._cls = None
         # Whether no more submittable bundles will be added.
@@ -346,6 +348,7 @@ class ActorPoolMapOperator(MapOperator):
             and ray_remote_args.get("max_restarts") != 0
         ):
             ray_remote_args["max_task_retries"] = -1
+
         return ray_remote_args
 
     def get_autoscaling_actor_pools(self) -> List[AutoscalingActorPool]:

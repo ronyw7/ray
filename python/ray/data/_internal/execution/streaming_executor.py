@@ -4,6 +4,7 @@ import time
 import uuid
 from typing import Dict, Iterator, List, Optional
 
+
 from ray.data._internal.execution.autoscaler import create_autoscaler
 from ray.data._internal.execution.backpressure_policy import (
     BackpressurePolicy,
@@ -30,6 +31,7 @@ from ray.data._internal.execution.streaming_executor_state import (
 from ray.data._internal.logging import get_log_directory
 from ray.data._internal.progress_bar import ProgressBar
 from ray.data._internal.stats import DatasetStats, StatsManager
+from ray.data._internal.execution.pipeline_metrics_tracker import PipelineMetricsTracker
 from ray.data.context import OK_PREFIX, WARN_PREFIX, DataContext
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,7 @@ DEBUG_LOG_INTERVAL_SECONDS = 5
 
 # Visible for testing.
 _num_shutdown = 0
+
 
 
 class StreamingExecutor(Executor, threading.Thread):
@@ -81,6 +84,11 @@ class StreamingExecutor(Executor, threading.Thread):
         self._num_errored_blocks = 0
 
         self._last_debug_log_time = 0
+
+        # self._sys_metrics_logger = SystemMetricsLogger(interval=1)
+        self._tracker = PipelineMetricsTracker.options(
+            name="tracker", get_if_exists=True
+        ).remote()
 
         Executor.__init__(self, options)
         thread_name = f"StreamingExecutor-{self._execution_id}"
@@ -122,6 +130,7 @@ class StreamingExecutor(Executor, threading.Thread):
 
         # Setup the streaming DAG topology and start the runner thread.
         self._topology, _ = build_streaming_topology(dag, self._options)
+        print("[Topology]", self._topology, flush=True)
         self._resource_manager = ResourceManager(
             self._topology,
             self._options,
@@ -218,6 +227,7 @@ class StreamingExecutor(Executor, threading.Thread):
                 op.shutdown()
                 state.close_progress_bars()
             self._autoscaler.on_executor_shutdown()
+            self._tracker.print_summary.remote()
 
     def run(self):
         """Run the control loop in a helper thread.
@@ -227,6 +237,10 @@ class StreamingExecutor(Executor, threading.Thread):
         try:
             # Run scheduling loop until complete.
             while True:
+                # if self._sys_metrics_logger.should_collect():
+                #     data, _ = self._sys_metrics_logger.log_once()
+                #     print(data, flush=True)
+
                 t_start = time.process_time()
                 # use process_time to avoid timing ray.wait in _scheduling_loop_step
                 continue_sched = self._scheduling_loop_step(self._topology)

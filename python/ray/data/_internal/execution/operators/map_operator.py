@@ -61,6 +61,7 @@ class MapOperator(OneToOneOperator, ABC):
         # NOTE: This constructor must be called by subclasses.
 
         self._map_transformer = map_transformer
+        self._map_transformer.set_name(name)
         self._supports_fusion = supports_fusion
         self._ray_remote_args = _canonicalize_ray_remote_args(ray_remote_args or {})
         self._ray_remote_args_fn = ray_remote_args_fn
@@ -256,9 +257,9 @@ class MapOperator(OneToOneOperator, ABC):
         if "scheduling_strategy" not in ray_remote_args:
             ctx = DataContext.get_current()
             if input_bundle and input_bundle.size_bytes() > ctx.large_args_threshold:
-                ray_remote_args[
-                    "scheduling_strategy"
-                ] = ctx.scheduling_strategy_large_args
+                ray_remote_args["scheduling_strategy"] = (
+                    ctx.scheduling_strategy_large_args
+                )
                 # Takes precedence over small args case. This is to let users know
                 # when the large args case is being triggered.
                 self._remote_args_for_metrics = copy.deepcopy(ray_remote_args)
