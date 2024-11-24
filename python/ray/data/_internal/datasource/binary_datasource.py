@@ -22,14 +22,11 @@ class BinaryDatasource(FileBasedDatasource):
     def _read_stream(self, f: "pyarrow.NativeFile", path: str):
         start_time = time.perf_counter()
         data = f.readall()
+        builder = ArrowBlockBuilder()
+        item = {self._COLUMN_NAME: data}
+        builder.add(item)
         end_time = time.perf_counter()
-        # print(
-        #     f"[{self.get_name()} Wall Time]",
-        #     end_time,  # Timestamp
-        #     (end_time - start_time),  # Wall Time
-        #     self._rows_per_file(),  # Num Rows
-        #     flush=True,
-        # )
+
         tracker = PipelineMetricsTracker.options(
             name="tracker", get_if_exists=True
         ).remote()
@@ -41,9 +38,6 @@ class BinaryDatasource(FileBasedDatasource):
             num_rows=self._rows_per_file(),
         )
 
-        builder = ArrowBlockBuilder()
-        item = {self._COLUMN_NAME: data}
-        builder.add(item)
         yield builder.build()
 
     def _rows_per_file(self):

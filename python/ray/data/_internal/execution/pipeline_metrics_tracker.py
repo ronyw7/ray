@@ -154,10 +154,18 @@ class PipelineMetricsTracker:
             return False
 
         for stage, events in self.get_raw_metrics(start_from=start_from).items():
-            self.summary_metrics[stage] = {
-                "total_wall_time": np.sum([r["wall_time"] for r in events]),
-                "total_num_rows": np.sum([r["rows"] for r in events]),
-            }
+            if stage != "inference":
+                total_wall_time = events[-1]["time"] - events[0]["time"]
+                self.summary_metrics[stage] = {
+                    # "total_wall_time": np.sum([r["wall_time"] for r in events]),
+                    "total_wall_time": total_wall_time,
+                    "total_num_rows": np.sum([r["rows"] for r in events]),
+                }
+            else:
+                self.summary_metrics[stage] = {
+                    "total_wall_time": np.sum([r["wall_time"] for r in events]),
+                    "total_num_rows": np.sum([r["rows"] for r in events]),
+                }
             # num pids
             self.summary_metrics[stage]["num_pids"] = len(
                 set([r["pid"] for r in events])
@@ -166,11 +174,6 @@ class PipelineMetricsTracker:
             self.summary_metrics[stage]["mean_tput"] = (
                 self.summary_metrics[stage]["total_num_rows"]
                 / self.summary_metrics[stage]["total_wall_time"]
-            )
-            # concurrent tput
-            self.summary_metrics[stage]["concurrent_tput"] = (
-                self.summary_metrics[stage]["mean_tput"]
-                * self.summary_metrics[stage]["num_pids"]
             )
 
         for stage, stall_times in self.stall_metrics.items():
@@ -189,7 +192,6 @@ class PipelineMetricsTracker:
                     name=stage,
                     num_pids=metrics["num_pids"],
                     mean_tput=metrics["mean_tput"],
-                    concurrent_tput=metrics["concurrent_tput"],
                     overall_pipeline_tput=self.overall_tput,
                     mean_data_stall=metrics["mean_data_stall"],
                 )
@@ -217,7 +219,6 @@ class PipelineMetricsTracker:
             logger.info(f"Total Num Rows: {metrics['total_num_rows']}")
             logger.info(f"Num Pids: {metrics['num_pids']}")
             logger.info(f"Mean Tput: {metrics['mean_tput']}")
-            logger.info(f"Concurrent Tput: {metrics['concurrent_tput']}")
             logger.info(f"Mean Data Stall: {metrics['mean_data_stall']}")
 
             logger.info(f"Overall Pipeline Tput: {self.overall_tput}")
@@ -232,14 +233,12 @@ class PipelineStageMetrics:
     stage: read
     mean_tput: 1000
     num_pids: 2
-    concurrent_tput: 2000
     data_stall: 0.001
     """
 
     name: str
     num_pids: int
     mean_tput: float
-    concurrent_tput: float
     overall_pipeline_tput: float
     mean_data_stall: float
 
@@ -257,9 +256,12 @@ class ScalingRequest:
 
 
 class PipelineBottleneckAnalyzer:
-    def __init__(self, interval=20, sink_stage_name="inference"):
+    def __init__(self, interval=10, request_interval=60, sink_stage_name="inference"):
         self.interval = interval
+
+        self.request_interval = request_interval
         self.last_analysis_time = time.perf_counter()
+        self.last_request_time = time.perf_counter()
 
         self.sink_stage_name = sink_stage_name
         self.data_stall_threshold = 0.15  # Seconds
@@ -271,7 +273,11 @@ class PipelineBottleneckAnalyzer:
     def should_analyze(self):
         return time.perf_counter() - self.last_analysis_time >= self.interval
 
+    def should_generate_request(self):
+        return time.perf_counter() - self.last_request_time >= self.request_interval
+
     def analyze(self) -> Optional[ScalingRequest]:
+        num_pid_optim = 0
         # For now, we only consider the CPU-bound cases; to add support for GPU request later.
         bottleneck_stage_by_tput = None
         bottleneck_stage_by_data_stall = None
@@ -284,8 +290,8 @@ class PipelineBottleneckAnalyzer:
 
         # Identify the bottleneck stage by throughput and by data stall time
         for stage in self.metrics:
-            if stage.concurrent_tput < lowest_tput:
-                lowest_tput = stage.concurrent_tput
+            if stage.mean_tput < lowest_tput:
+                lowest_tput = stage.mean_tput
                 bottleneck_stage_by_tput = stage
 
             if stage.mean_data_stall < lowest_data_stall:
@@ -293,17 +299,20 @@ class PipelineBottleneckAnalyzer:
                 bottleneck_stage_by_data_stall = stage
                 bottleneck_num_pids = stage.num_pids
 
-            if stage.name == "inference":
-                inference_tput = stage.concurrent_tput
+            if stage.name == self.sink_stage_name:
+                inference_tput = stage.mean_tput
                 inference_data_stall = stage.mean_data_stall
 
         # First, optimize along throughput
         bottleneck_stage = bottleneck_stage_by_tput
+        bottleneck_stage_tput_per_pid = (
+            bottleneck_stage.mean_tput / bottleneck_stage.num_pids
+        )
         self.last_analysis_time = time.perf_counter()
 
         if bottleneck_stage.name != self.sink_stage_name:
             # Throughput is not yet optimized; scale based on throughput bottleneck
-            num_pid_optim = int(inference_tput // bottleneck_stage.mean_tput) + 1
+            num_pid_optim = int(inference_tput // bottleneck_stage_tput_per_pid) + 1
             num_pid_requested = num_pid_optim - bottleneck_stage.num_pids
 
             msg = (
@@ -326,16 +335,17 @@ class PipelineBottleneckAnalyzer:
             if data_stall_difference > self.data_stall_threshold:
                 logger.info(
                     f"Data stall detected at stage '{bottleneck_stage.name}'. "
-                    f"Mean data stall time: {bottleneck_stage.mean_data_stall}"
+                    f"This stage has mean data stall time: {bottleneck_stage.mean_data_stall}"
+                    f"But the sink (inference) stage has mean data stall time: {inference_data_stall}"
                 )
-                num_pid_optim = int(inference_tput // bottleneck_stage.mean_tput) + 1
+                num_pid_optim = int(inference_tput // bottleneck_stage_tput_per_pid) + 1
 
                 self.data_stall_compensated += 1
                 num_pid_optim += self.data_stall_compensated
 
-                num_pid_requested = 1
+                num_pid_requested: int = 1
             else:
-                num_pid_requested = 0
+                num_pid_requested: int = 0
 
             # Pipeline metrics summary
             msg = (
@@ -352,16 +362,19 @@ class PipelineBottleneckAnalyzer:
         import psutil
 
         num_cpus = psutil.cpu_count(logical=False)
-        if bottleneck_num_pids + num_pid_requested > num_cpus:
+        if num_pid_optim > num_cpus:
             logger.info(
-                f"Optimal number of PIDs ({bottleneck_num_pids + num_pid_requested}) exceeds the number of CPUs ({num_cpus})."
+                f"Optimal number of PIDs ({num_pid_optim}) exceeds the number of CPUs ({num_cpus})."
             )
             return None, msg
-        elif num_pid_requested == 0:
+        if num_pid_requested == 0:
             logger.info("No scaling request generated.")
             return None, msg
 
-        return ScalingRequest("CPU", num_pid_requested), msg
+        if self.should_generate_request():
+            self.last_request_time = time.perf_counter()
+            return ScalingRequest("CPU", num_pid_requested), msg
+        return None, msg
 
 
 class PipelineResourceScaler:
